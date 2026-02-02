@@ -1182,6 +1182,38 @@
     </div>
   </div>
 
+  <!-- Token刷新进度模态框 -->
+  <div id="refreshProgressModal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+    <div class="bg-background rounded-lg border border-border w-full max-w-md shadow-xl">
+      <div class="flex items-center justify-between p-5 border-b border-border">
+        <h3 class="text-lg font-semibold">刷新Token剩余次数</h3>
+        <button id="refreshCancelBtn" onclick="cancelRefreshTask()" class="text-sm text-destructive hover:underline font-medium">取消</button>
+      </div>
+      <div class="p-5 space-y-4">
+        <div class="space-y-2">
+          <div class="flex justify-between text-sm">
+            <span>进度</span>
+            <span id="refreshProgressText">0/0 (0%)</span>
+          </div>
+          <div class="w-full bg-muted rounded-full h-3 overflow-hidden">
+            <div id="refreshProgressBar" class="bg-primary h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4 text-sm">
+          <div class="p-3 rounded-lg bg-green-50 border border-green-200">
+            <div class="text-green-600 font-medium">成功</div>
+            <div id="refreshSuccessCount" class="text-xl font-bold text-green-700">0</div>
+          </div>
+          <div class="p-3 rounded-lg bg-red-50 border border-red-200">
+            <div class="text-red-600 font-medium">失败</div>
+            <div id="refreshFailedCount" class="text-xl font-bold text-red-700">0</div>
+          </div>
+        </div>
+        <div id="refreshStatus" class="text-sm text-muted-foreground text-center">正在启动...</div>
+      </div>
+    </div>
+  </div>
+
   <script>
     let allTokens = [], filteredTokens = [], selectedTokens = new Set(), allTagsList = [];
     let allLogsData = [], currentLogPage = 1, logsPerPage = 20;
@@ -1580,54 +1612,183 @@
     const filterTokens = () => { const tf = $('filterType').value, sf = $('filterStatus').value, tagf = $('filterTag').value; filteredTokens = allTokens.filter(t => (tf === 'all' || t.token_type === tf) && (sf === 'all' || t.status === sf) && (tagf === 'all' || t.tags && t.tags.includes(tagf))); selectedTokens.clear(); renderTokens() };
     const loadAllTags = async () => { try { const r = await apiRequest('/api/tokens/tags/all'); if (!r) return; const d = await r.json(); if (d.success) { allTagsList = d.data; const tagFilter = $('filterTag'); const currentValue = tagFilter.value; tagFilter.innerHTML = '<option value="all">全部标签</option>' + allTagsList.map(tag => `<option value="${tag}">${tag}</option>`).join(''); tagFilter.value = currentValue } } catch (e) { console.error('加载标签列表失败:', e) } };
     const refreshTokens = async () => { await loadTokens(); await loadStats() };
-    const refreshAllTokens = async () => {
-      if (!confirm('确定要刷新所有Token的剩余次数吗？这可能需要一段时间...')) return;
-
-      try {
-        const r = await apiRequest('/api/tokens/refresh-all', { method: 'POST' });
-        if (!r) return;
-        const d = await r.json();
-
-        if (!d.success && d.data?.running) {
-          showToast('刷新任务正在进行中，请稍后再试', 'error');
-          return;
-        }
-
-        if (!d.success) {
-          showToast(d.message || '启动刷新失败', 'error');
-          return;
-        }
-
-        showToast('刷新任务已启动...', 'info');
-        await new Promise(resolve => setTimeout(resolve, 300));
-
-        while (true) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-          try {
-            const pr = await apiRequest('/api/tokens/refresh-progress');
-            if (!pr) break;
-            const pd = await pr.json();
-            if (pd.success && pd.data) {
-              const { current, total, success, failed, running } = pd.data;
-
-              if (!running) {
-                showToast(`刷新完成: 成功 ${success} 个, 失败 ${failed} 个`, 'success');
-                break;
-              }
-
-              if (total > 0) {
-                const pct = Math.round((current / total) * 100);
-                showToast(`刷新进度: ${current}/${total} (${pct}%) | 成功: ${success} 失败: ${failed}`, 'info');
-              }
-            }
-          } catch (e) { break; }
-        }
-
-        await refreshTokens();
-      } catch (e) {
-        showToast('刷新失败: ' + e.message, 'error');
+    let refreshPollingActive = false;
+    
+    const showRefreshModal = () => {
+      $('refreshProgressModal').classList.remove('hidden');
+      $('refreshProgressBar').style.width = '0%';
+      $('refreshProgressText').textContent = '0/0 (0%)';
+      $('refreshSuccessCount').textContent = '0';
+      $('refreshFailedCount').textContent = '0';
+      $('refreshStatus').textContent = '正在启动...';
+      $('refreshCancelBtn').classList.remove('hidden');
+    };
+    
+    const hideRefreshModal = () => {
+      $('refreshProgressModal').classList.add('hidden');
+      refreshPollingActive = false;
+    };
+    
+    const updateRefreshProgress = (data) => {
+      const { current, total, success, failed, running } = data;
+      const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+      
+      $('refreshProgressBar').style.width = `${pct}%`;
+      $('refreshProgressText').textContent = `${current}/${total} (${pct}%)`;
+      $('refreshSuccessCount').textContent = success;
+      $('refreshFailedCount').textContent = failed;
+      
+      if (running) {
+        $('refreshStatus').textContent = `正在处理第 ${current} 个 Token...`;
+      } else {
+        $('refreshStatus').textContent = '刷新完成!';
+        $('refreshCancelBtn').classList.add('hidden');
       }
     };
+    
+    const cancelRefreshTask = async () => {
+      // 纯前端取消
+      if (frontendRefreshActive) {
+        frontendRefreshCancelled = true;
+        $('refreshStatus').textContent = '正在取消...';
+        showToast('已发送取消信号，等待当前任务完成...', 'success');
+      } else {
+        showToast('当前没有正在进行的刷新任务', 'error');
+      }
+    };
+    
+    // 纯前端刷新状态
+    let frontendRefreshActive = false;
+    let frontendRefreshCancelled = false;
+    
+    const refreshAllTokens = async () => {
+      if (frontendRefreshActive) {
+        showToast('已有刷新任务在进行中', 'error');
+        return;
+      }
+      
+      if (!confirm('确定要刷新所有Token的剩余次数吗？这可能需要一段时间...')) return;
+
+      // 使用当前已加载的 allTokens 数据
+      if (!allTokens || allTokens.length === 0) {
+        showToast('没有Token需要刷新，请先刷新列表', 'error');
+        return;
+      }
+      
+      frontendRefreshActive = true;
+      frontendRefreshCancelled = false;
+      
+      // 显示进度模态框
+      showRefreshModal();
+      
+      const total = allTokens.length;
+      let current = 0;
+      let success = 0;
+      let failed = 0;
+      
+      // 并发控制：同时最多 10 个请求
+      const concurrency = 10;
+      
+      // 创建任务队列
+      const queue = [...allTokens];
+      const runningTasks = new Set();
+      
+      const processToken = async (tokenData) => {
+        if (frontendRefreshCancelled) return;
+        
+        try {
+          const r = await apiRequest('/api/tokens/test', {
+            method: 'POST',
+            body: JSON.stringify({
+              token: tokenData.token,
+              token_type: tokenData.token_type
+            })
+          });
+          
+          if (r) {
+            const d = await r.json();
+            if (d.success && d.data?.valid) {
+              success++;
+            } else {
+              failed++;
+            }
+          } else {
+            failed++;
+          }
+        } catch (e) {
+          console.error('刷新Token失败:', e);
+          failed++;
+        }
+        
+        current++;
+        
+        // 更新进度
+        updateRefreshProgress({
+          current,
+          total,
+          success,
+          failed,
+          running: current < total && !frontendRefreshCancelled
+        });
+      };
+      
+      // 并发执行器
+      const runNext = async () => {
+        while (queue.length > 0 && !frontendRefreshCancelled) {
+          if (runningTasks.size >= concurrency) {
+            await new Promise(r => setTimeout(r, 50));
+            continue;
+          }
+          
+          const tokenData = queue.shift();
+          if (!tokenData) break;
+          
+          const task = processToken(tokenData).finally(() => {
+            runningTasks.delete(task);
+          });
+          runningTasks.add(task);
+        }
+        
+        // 等待所有任务完成
+        while (runningTasks.size > 0) {
+          await new Promise(r => setTimeout(r, 50));
+        }
+      };
+      
+      try {
+        await runNext();
+        
+        // 完成后更新状态
+        updateRefreshProgress({
+          current,
+          total,
+          success,
+          failed,
+          running: false
+        });
+        
+        if (frontendRefreshCancelled) {
+          showToast(`刷新已取消: 成功 ${success} 个, 失败 ${failed} 个`, 'info');
+        } else {
+          showToast(`刷新完成: 成功 ${success} 个, 失败 ${failed} 个`, 'success');
+        }
+        
+        // 2秒后关闭模态框并刷新列表
+        setTimeout(async () => {
+          hideRefreshModal();
+          await refreshTokens();
+        }, 2000);
+        
+      } catch (e) {
+        showToast('刷新失败: ' + e.message, 'error');
+        hideRefreshModal();
+      } finally {
+        frontendRefreshActive = false;
+        frontendRefreshCancelled = false;
+      }
+    };
+    
+    // startRefreshPolling 已废弃，使用纯前端方案不需要轮询
     const openAddModal = () => $('addModal').classList.remove('hidden');
     const closeAddModal = () => { $('addModal').classList.add('hidden'); $('addTokenList').value = '' };
     const deleteToken = async (t, tt) => { if (!confirm('确定要删除这个 Token 吗?')) return; try { const r = await apiRequest('/api/tokens/delete', { method: 'POST', body: JSON.stringify({ tokens: [t], token_type: tt }) }); if (!r) return; const d = await r.json(); d.success ? await refreshTokens() : showToast('删除失败: ' + (d.error || '未知错误'), 'error') } catch (e) { showToast('删除失败: ' + e.message, 'error') } };
