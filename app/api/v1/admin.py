@@ -330,7 +330,9 @@ async def enable_nsfw_tokens_api(data: dict):
         ok_count = 0
         failed_count = 0
         for token, result in results_list:
-            results[token[:16] + "..." if len(token) > 20 else token] = result
+            # Consistently mask all tokens to avoid exposing sensitive data
+            masked = f"{token[:8]}...{token[-4:]}" if len(token) > 16 else f"{token[:4]}..."
+            results[masked] = result
             if result.get("ok"):
                 ok_count += 1
             else:

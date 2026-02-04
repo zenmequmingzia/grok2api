@@ -22,7 +22,12 @@ def _generate_random_birthdate() -> str:
     birth_year = today.year - age
     birth_month = random.randint(1, 12)
     birth_day = random.randint(1, 28)  # Avoid month day count issues
-    return f"{birth_year}-{birth_month:02d}-{birth_day:02d}T16:00:00.000Z"
+    # Randomize time component to avoid fingerprinting
+    hour = random.randint(0, 23)
+    minute = random.randint(0, 59)
+    second = random.randint(0, 59)
+    ms = random.randint(0, 999)
+    return f"{birth_year}-{birth_month:02d}-{birth_day:02d}T{hour:02d}:{minute:02d}:{second:02d}.{ms:03d}Z"
 
 
 class BirthDateService:
