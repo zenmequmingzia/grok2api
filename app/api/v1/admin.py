@@ -238,6 +238,110 @@ async def auto_register_stop_api(job_id: str | None = None):
     await manager.stop_job()
     return {"status": "stopping"}
 
+
+@router.post("/api/v1/admin/tokens/enable-nsfw", dependencies=[Depends(verify_api_key)])
+async def enable_nsfw_tokens_api(data: dict):
+    """Enable NSFW settings for tokens (TOS + birth date + NSFW)."""
+    from app.services.register.services import UserAgreementService, BirthDateService, NsfwSettingsService
+
+    try:
+        tokens = data.get("tokens", [])
+        if isinstance(data.get("token"), str):
+            tokens = [data.get("token")]
+        if not tokens or not isinstance(tokens, list):
+            raise HTTPException(status_code=400, detail="No tokens provided")
+
+        tokens = [t.strip() for t in tokens if isinstance(t, str) and t.strip()]
+        if not tokens:
+            raise HTTPException(status_code=400, detail="No valid tokens provided")
+
+        concurrency = data.get("concurrency", 10)
+        try:
+            concurrency = max(1, min(50, int(concurrency)))
+        except Exception:
+            concurrency = 10
+
+        cf_clearance = str(get_config("grok.cf_clearance", "") or "").strip()
+
+        def _extract_cookie_value(cookie_str: str, name: str) -> str | None:
+            needle = f"{name}="
+            if needle not in cookie_str:
+                return None
+            for part in cookie_str.split(";"):
+                part = part.strip()
+                if part.startswith(needle):
+                    return part[len(needle):].strip()
+            return None
+
+        def _normalize_tokens(raw_token: str) -> tuple:
+            raw_token = raw_token.strip()
+            if ";" in raw_token:
+                sso_val = _extract_cookie_value(raw_token, "sso") or ""
+                sso_rw_val = _extract_cookie_value(raw_token, "sso-rw") or sso_val
+            else:
+                sso_val = raw_token[4:] if raw_token.startswith("sso=") else raw_token
+                sso_rw_val = sso_val
+            return sso_val, sso_rw_val
+
+        def _apply_settings(raw_token: str) -> dict:
+            sso_val, sso_rw_val = _normalize_tokens(raw_token)
+            if not sso_val:
+                return {"ok": False, "error": "Invalid token format"}
+
+            user_service = UserAgreementService(cf_clearance=cf_clearance)
+            birth_date_service = BirthDateService(cf_clearance=cf_clearance)
+            nsfw_service = NsfwSettingsService(cf_clearance=cf_clearance)
+
+            tos_result = user_service.accept_tos_version(
+                sso=sso_val,
+                sso_rw=sso_rw_val or sso_val,
+                impersonate="chrome120",
+            )
+            if not tos_result.get("ok"):
+                return {"ok": False, "error": f"TOS failed: {tos_result.get('error') or 'unknown'}"}
+
+            birth_date_result = birth_date_service.set_birth_date(
+                sso=sso_val,
+                sso_rw=sso_rw_val or sso_val,
+                impersonate="chrome120",
+            )
+            if not birth_date_result.get("ok"):
+                return {"ok": False, "error": f"Birth date failed: {birth_date_result.get('error') or 'unknown'}"}
+
+            nsfw_result = nsfw_service.enable_nsfw(
+                sso=sso_val,
+                sso_rw=sso_rw_val or sso_val,
+                impersonate="chrome120",
+            )
+            if not nsfw_result.get("ok"):
+                return {"ok": False, "error": f"NSFW failed: {nsfw_result.get('error') or 'unknown'}"}
+
+            return {"ok": True}
+
+        sem = asyncio.Semaphore(concurrency)
+
+        async def _run_one(token: str) -> tuple:
+            async with sem:
+                result = await asyncio.to_thread(_apply_settings, token)
+                return token, result
+
+        results_list = await asyncio.gather(*[_run_one(t) for t in tokens])
+        results = {}
+        ok_count = 0
+        failed_count = 0
+        for token, result in results_list:
+            results[token[:16] + "..." if len(token) > 20 else token] = result
+            if result.get("ok"):
+                ok_count += 1
+            else:
+                failed_count += 1
+
+        return {"status": "success", "total": len(tokens), "ok": ok_count, "failed": failed_count, "results": results}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/admin/cache", response_class=HTMLResponse, include_in_schema=False)
 async def admin_cache_page():
     """缓存管理页"""

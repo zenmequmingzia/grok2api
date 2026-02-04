@@ -20,6 +20,7 @@ from app.services.register.services import (
     TurnstileService,
     UserAgreementService,
     NsfwSettingsService,
+    BirthDateService,
 )
 
 
@@ -233,6 +234,7 @@ class RegisterRunner:
             turnstile_service = TurnstileService()
             user_agreement_service = UserAgreementService()
             nsfw_service = NsfwSettingsService()
+            birth_date_service = BirthDateService()
         except Exception as exc:
             self._record_error(f"service init failed: {exc}")
             return
@@ -368,6 +370,16 @@ class RegisterRunner:
                         )
                         if not tos_result.get("ok") or not tos_result.get("hex_reply"):
                             self._record_error(f"accept_tos failed: {tos_result.get('error') or 'unknown'}")
+                            break
+
+                        birth_date_result = birth_date_service.set_birth_date(
+                            sso=sso,
+                            sso_rw=sso_rw or "",
+                            impersonate=impersonate_fingerprint,
+                            user_agent=account_user_agent,
+                        )
+                        if not birth_date_result.get("ok"):
+                            self._record_error(f"set_birth_date failed: {birth_date_result.get('error') or 'unknown'}")
                             break
 
                         nsfw_result = nsfw_service.enable_nsfw(

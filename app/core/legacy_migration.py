@@ -154,7 +154,7 @@ async def migrate_legacy_account_settings(
 
         from app.core.config import get_config
         from app.core.storage import get_storage
-        from app.services.register.services import UserAgreementService, NsfwSettingsService
+        from app.services.register.services import UserAgreementService, NsfwSettingsService, BirthDateService
 
         storage = get_storage()
         try:
@@ -215,9 +215,15 @@ async def migrate_legacy_account_settings(
                 return False
 
             user_service = UserAgreementService(cf_clearance=cf_clearance)
+            birth_date_service = BirthDateService(cf_clearance=cf_clearance)
             nsfw_service = NsfwSettingsService(cf_clearance=cf_clearance)
 
             tos_result = user_service.accept_tos_version(
+                sso=sso_val,
+                sso_rw=sso_rw_val or sso_val,
+                impersonate="chrome120",
+            )
+            birth_date_result = birth_date_service.set_birth_date(
                 sso=sso_val,
                 sso_rw=sso_rw_val or sso_val,
                 impersonate="chrome120",
@@ -227,7 +233,7 @@ async def migrate_legacy_account_settings(
                 sso_rw=sso_rw_val or sso_val,
                 impersonate="chrome120",
             )
-            return bool(tos_result.get("ok") and nsfw_result.get("ok"))
+            return bool(tos_result.get("ok") and birth_date_result.get("ok") and nsfw_result.get("ok"))
 
         sem = asyncio.Semaphore(concurrency)
 
