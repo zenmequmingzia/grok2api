@@ -68,13 +68,19 @@ class BaseProcessor:
             
         if not path.startswith("/"):
             path = f"/{path}"
-            
+
+        # Invalid root path is not a displayable image URL.
+        if path in {"", "/"}:
+            return ""
+
+        # Always materialize to local cache endpoint so callers don't rely on
+        # direct assets.grok.com access (often blocked without upstream cookies).
+        dl_service = self._get_dl()
+        await dl_service.download(path, self.token, media_type)
+        local_path = f"/v1/files/{media_type}{path}"
         if self.app_url:
-            dl_service = self._get_dl()
-            await dl_service.download(path, self.token, media_type)
-            return f"{self.app_url.rstrip('/')}/v1/files/{media_type}{path}"
-        else:
-            return f"{ASSET_URL.rstrip('/')}{path}"
+            return f"{self.app_url.rstrip('/')}{local_path}"
+        return local_path
             
     def _sse(self, content: str = "", role: str = None, finish: str = None) -> str:
         """构建 SSE 响应 (StreamProcessor 通用)"""

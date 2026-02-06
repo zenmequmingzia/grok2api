@@ -239,12 +239,15 @@ class ImagineExperimentalService:
                     continue
                 if mode == "url":
                     path = _normalize_asset_path(raw)
+                    if path in {"", "/"}:
+                        continue
+                    await dl.download(path, token, "image")
                     app_url = str(get_config("app.app_url", "") or "").strip()
+                    local_path = f"/v1/files/image{path}"
                     if app_url:
-                        await dl.download(path, token, "image")
-                        out.append(f"{app_url.rstrip('/')}/v1/files/image{path}")
+                        out.append(f"{app_url.rstrip('/')}{local_path}")
                     else:
-                        out.append(f"{ASSET_API}{path}")
+                        out.append(local_path)
                     continue
 
                 data_uri = await dl.to_base64(raw, token, "image")
@@ -383,4 +386,3 @@ __all__ = [
     "IMAGE_METHODS",
     "resolve_image_generation_method",
 ]
-

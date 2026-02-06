@@ -43,6 +43,37 @@ function toAbsoluteUrl(url) {
   }
 }
 
+function detectBase64ImageMime(base64Text) {
+  const s = String(base64Text || '').trim().replace(/\s+/g, '');
+  if (!s) return 'image/png';
+  if (s.startsWith('/9j/')) return 'image/jpeg';
+  if (s.startsWith('iVBORw0KGgo')) return 'image/png';
+  if (s.startsWith('UklGR')) return 'image/webp';
+  if (s.startsWith('R0lGOD')) return 'image/gif';
+  if (s.startsWith('Qk')) return 'image/bmp';
+  return 'image/png';
+}
+
+function toImageDataUrl(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  if (value.startsWith('data:image/')) return value;
+  const mime = detectBase64ImageMime(value);
+  return `data:${mime};base64,${value}`;
+}
+
+function pickImageSrc(item) {
+  const rawUrl = String(item?.url || '').trim();
+  if (rawUrl && rawUrl !== 'https://assets.grok.com/' && rawUrl !== 'https://assets.grok.com') {
+    return toAbsoluteUrl(rawUrl);
+  }
+  const b64json = String(item?.b64_json || '').trim();
+  if (b64json) return toImageDataUrl(b64json);
+  const base64 = String(item?.base64 || '').trim();
+  if (base64) return toImageDataUrl(base64);
+  return '';
+}
+
 function showUserMsg(role, content) {
   const wrap = document.createElement('div');
   wrap.className = 'msg';
@@ -418,7 +449,7 @@ async function generateImage() {
     const res = await fetch('/v1/images/generations', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ prompt, model, n, response_format: 'url' }),
+      body: JSON.stringify({ prompt, model, n }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data?.error?.message || data?.detail || `HTTP ${res.status}`);
@@ -426,14 +457,17 @@ async function generateImage() {
     const items = Array.isArray(data?.data) ? data.data : [];
     if (!items.length) throw new Error('没有生成结果');
 
+    let rendered = 0;
     items.forEach((it) => {
-      const url = it.url ? String(it.url) : it.b64_json ? `data:image/png;base64,${String(it.b64_json)}` : '';
+      const url = pickImageSrc(it);
       if (!url) return;
+      rendered += 1;
       const card = document.createElement('div');
       card.className = 'result-card';
       card.innerHTML = `<img src="${escapeHtml(url)}" alt="image" />`;
       q('image-results').appendChild(card);
     });
+    if (!rendered) throw new Error('图片返回为空或格式不支持');
   } catch (e) {
     showToast('生图失败: ' + (e?.message || e), 'error');
   }
