@@ -69,6 +69,7 @@ URL: `http://<host>:8000/login`
 Default username/password: `admin` / `admin` (config keys `app.admin_username` / `app.app_key`, change it in production).
 
 Pages:
+
 - `http://<host>:8000/admin/token`: Token management (import/export/batch ops/auto register)
 - `http://<host>:8000/admin/keys`: API key management (stats/filter/create/edit/delete)
 - `http://<host>:8000/admin/datacenter`: Data center (metrics + log viewer)
@@ -114,12 +115,14 @@ Pages:
 ### Auto Register (Token -> Add -> Auto Register)
 
 Auto register will:
+
 - Start a local Turnstile Solver first (default 5 threads), then run registration
 - Stop the solver automatically when the job finishes
 - After a successful sign-up, it will automatically: accept TOS + set BirthDate + enable NSFW
   - If any TOS/BirthDate/NSFW step fails, the registration attempt is marked as failed and the UI will show the reason
 
 Required config keys (Admin -> Config, `register.*`):
+
 - `register.worker_domain` / `register.email_domain` / `register.admin_password`: temp-mail Worker settings
 - `register.solver_url` / `register.solver_browser_type` / `register.solver_threads`: local solver settings
 - Optional: `register.yescaptcha_key` (when set, YesCaptcha is preferred and local solver is not required)
@@ -152,7 +155,9 @@ Required config keys (Admin -> Config, `register.*`):
 | `grok-4-heavy` | 4 | Super | Yes | Yes | - |
 | `grok-4.1` | 1 | Basic/Super | Yes | Yes | - |
 | `grok-4.1-thinking` | 4 | Basic/Super | Yes | Yes | - |
+| `grok-4.20-beta` | 1 | Basic/Super | Yes | Yes | - |
 | `grok-imagine-1.0` | 4 | Basic/Super | - | Yes | - |
+| `grok-imagine-1.0-edit` | 4 | Basic/Super | - | Yes | - |
 | `grok-imagine-1.0-video` | - | Basic/Super | - | - | Yes |
 
 <br>
@@ -160,6 +165,7 @@ Required config keys (Admin -> Config, `register.*`):
 ## API
 
 ### `POST /v1/chat/completions`
+>
 > Generic endpoint: chat, image generation, image editing, video generation, video upscaling
 
 ```bash
@@ -196,6 +202,7 @@ Note: any other parameters will be discarded and ignored.
 </details>
 
 ### `POST /v1/images/generations`
+>
 > Image endpoint: image generation, image editing
 
 ```bash
@@ -225,6 +232,7 @@ curl http://localhost:8000/v1/images/generations \
 | `response_format` | string | Output format | `url`, `base64`, `b64_json` (defaults to `app.image_format`) |
 
 Notes:
+
 - when `grok.image_generation_method=imagine_ws_experimental`, `stream=true` uses SSE realtime image events (`image_generation.partial_image` then `image_generation.completed`) and keeps SSE semantics even on fallback.
 - `size` is normalized to aspect ratios: `16:9`, `9:16`, `1:1`, `2:3`, `3:2`; unsupported values default to `2:3`.
 - any other parameters will be discarded and ignored.
@@ -236,6 +244,7 @@ Notes:
 <br>
 
 ### `GET /v1/images/method`
+>
 > Get the active image-generation backend mode (used by `/chat` and `/admin/chat` to toggle the experimental waterfall UI).
 
 ```bash
@@ -244,15 +253,18 @@ curl http://localhost:8000/v1/images/method \
 ```
 
 Response example:
+
 ```json
 { "image_generation_method": "legacy" }
 ```
 
 `image_generation_method` values:
+
 - `legacy`
 - `imagine_ws_experimental`
 
 ### `POST /v1/images/edits`
+>
 > Image edit endpoint (`multipart/form-data`)
 
 ```bash
@@ -366,6 +378,10 @@ When upgrading from older versions, the service will keep existing local data an
 | | `max_runtime_minutes` | Max runtime | Stop the job after N minutes (0 = unlimited). | `0` |
 
 <br>
+
+## Updates In This Release
+
+- Online chat (`/chat` and `/admin/chat`): when `grok-imagine-1.0-edit` model is selected in the image tab, an upload button appears allowing users to upload a reference image for editing via `/v1/images/edits`.
 
 ## Fixes In This Release
 

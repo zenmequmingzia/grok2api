@@ -410,6 +410,7 @@ curl http://localhost:8000/v1/images/edits \
 - 新增：导入/手动添加/外部写入新增 Token 后，会在后台自动执行 `同意协议 + 设置年龄 + 开启 NSFW`。
 - 新增：Token 管理页增加「一键刷新 NSFW」按钮，默认对全部 Token 执行上述流程。
 - 新增：批量刷新默认并发 `10`，失败后额外重试 `3` 次；重试耗尽自动标记为失效。
+- 新增：在线聊天（`/chat` 与 `/admin/chat`）生图 Tab 选择 `grok-imagine-1.0-edit` 模型时，自动显示「上传参考图」按钮，支持上传图片后输入 prompt 进行图片编辑（通过 `/v1/images/edits` 接口）。
 - 新增配置：
   - `token.nsfw_refresh_concurrency`（默认 `10`）
   - `token.nsfw_refresh_retries`（默认 `3`）
