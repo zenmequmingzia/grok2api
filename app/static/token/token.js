@@ -222,9 +222,10 @@ async function applyRuntimeUiFlags() {
   setAutoRegisterUiEnabled(false);
   setNsfwRefreshUiEnabled(false);
   isWorkersRuntime = await detectWorkersRuntime();
+  // NSFW button should always be shown (works on both Workers and local).
+  setNsfwRefreshUiEnabled(true);
   if (!isWorkersRuntime) {
     setAutoRegisterUiEnabled(true);
-    setNsfwRefreshUiEnabled(true);
   }
 }
 
@@ -1156,7 +1157,7 @@ async function refreshAllNsfw() {
   }
 
   const ok = await confirmAction(
-    '将对全部 Token 执行：同意用户协议 + 设置年龄 + 开启 NSFW。未成功的 Token 会自动标记为失效，是否继续？',
+    '将对全部 Token 开启 NSFW（always_show_nsfw_content）。是否继续？',
     { okText: '开始刷新' }
   );
   if (!ok) return;
@@ -1170,30 +1171,42 @@ async function refreshAllNsfw() {
   }
 
   try {
-    const res = await fetch('/api/v1/admin/tokens/nsfw/refresh', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...buildAuthHeaders(apiKey)
-      },
-      body: JSON.stringify({ all: true })
-    });
+    // On local/docker, use the full nsfw/refresh endpoint (TOS + birth + NSFW).
+    // On Cloudflare Workers, use the simpler enable-nsfw endpoint.
+    if (!isWorkersRuntime) {
+      const res = await fetch('/api/v1/admin/tokens/nsfw/refresh', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...buildAuthHeaders(apiKey)
+        },
+        body: JSON.stringify({ all: true })
+      });
 
-    const payload = await parseJsonSafely(res);
-    if (!res.ok) {
-      showToast(extractApiErrorMessage(payload, 'NSFW 刷新失败'), 'error');
-      return;
+      const payload = await parseJsonSafely(res);
+      if (!res.ok) {
+        showToast(extractApiErrorMessage(payload, 'NSFW 刷新失败'), 'error');
+        return;
+      }
+
+      const summary = payload?.summary || {};
+      const total = Number(summary.total || 0);
+      const success = Number(summary.success || 0);
+      const failed = Number(summary.failed || 0);
+      const invalidated = Number(summary.invalidated || 0);
+      showToast(
+        `NSFW 刷新完成：总计 ${total}，成功 ${success}，失败 ${failed}，失效 ${invalidated}`,
+        failed > 0 ? 'info' : 'success'
+      );
+    } else {
+      // Workers: collect all tokens and call enable-nsfw
+      const allTokenKeys = flatTokens.map(t => normalizeSsoToken(t.token)).filter(Boolean);
+      if (!allTokenKeys.length) {
+        showToast('没有可用的 Token', 'info');
+        return;
+      }
+      await batchEnableNsfw(allTokenKeys);
     }
-
-    const summary = payload?.summary || {};
-    const total = Number(summary.total || 0);
-    const success = Number(summary.success || 0);
-    const failed = Number(summary.failed || 0);
-    const invalidated = Number(summary.invalidated || 0);
-    showToast(
-      `NSFW 刷新完成：总计 ${total}，成功 ${success}，失败 ${failed}，失效 ${invalidated}`,
-      failed > 0 ? 'info' : 'success'
-    );
     loadData();
   } catch (e) {
     showToast(e?.message ? `NSFW 刷新失败: ${e.message}` : 'NSFW 刷新失败', 'error');
@@ -1204,6 +1217,53 @@ async function refreshAllNsfw() {
       btn.innerHTML = originalText || '一键刷新 NSFW';
     }
   }
+}
+
+async function batchEnableNsfw(tokenList) {
+  const CHUNK = 20;
+  let success = 0;
+  let failed = 0;
+  for (let i = 0; i < tokenList.length; i += CHUNK) {
+    const chunk = tokenList.slice(i, i + CHUNK);
+    try {
+      const res = await fetch('/api/tokens/enable-nsfw', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...buildAuthHeaders(apiKey)
+        },
+        body: JSON.stringify({ tokens: chunk })
+      });
+      const payload = await parseJsonSafely(res);
+      if (res.ok && payload?.results) {
+        for (const [, v] of Object.entries(payload.results)) {
+          if (v && v.ok) success++;
+          else failed++;
+        }
+      } else {
+        failed += chunk.length;
+      }
+    } catch (e) {
+      failed += chunk.length;
+    }
+  }
+  showToast(
+    `NSFW 开启完成：成功 ${success}，失败 ${failed}`,
+    failed > 0 ? 'info' : 'success'
+  );
+}
+
+async function batchNsfwSelected() {
+  const selected = flatTokens.filter(t => t._selected);
+  if (!selected.length) return showToast('未选择 Token', 'error');
+  const ok = await confirmAction(
+    `将为选中的 ${selected.length} 个 Token 开启 NSFW，是否继续？`,
+    { okText: '开启 NSFW' }
+  );
+  if (!ok) return;
+  const tokens = selected.map(t => normalizeSsoToken(t.token)).filter(Boolean);
+  await batchEnableNsfw(tokens);
+  loadData();
 }
 
 async function startBatchRefresh() {

@@ -208,7 +208,7 @@ async function init() {
           localStorage.setItem(STORAGE_KEY, k);
         }
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   const saved = localStorage.getItem(STORAGE_KEY) || '';
@@ -274,7 +274,7 @@ function renderAttachments(kind) {
     div.className = 'attach-item';
     div.innerHTML = `<img src="${it.previewUrl}" alt="img"><button title="绉婚櫎">脳</button>`;
     div.querySelector('button').addEventListener('click', () => {
-      try { URL.revokeObjectURL(it.previewUrl); } catch (e) {}
+      try { URL.revokeObjectURL(it.previewUrl); } catch (e) { }
       list.splice(idx, 1);
       renderAttachments(kind);
     });
@@ -480,7 +480,7 @@ function openImageContinuousSocket(socketIndex, runToken, prompt, aspectRatio, a
 
   ws.onopen = () => {
     if (!imageContinuousRunning || runToken !== imageContinuousRunToken || getImageRunMode() !== 'continuous') {
-      try { ws.close(1000, 'stale'); } catch (e) {}
+      try { ws.close(1000, 'stale'); } catch (e) { }
       return;
     }
     clearImageContinuousError();
@@ -594,12 +594,12 @@ function stopImageContinuous() {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'stop' }));
       }
-    } catch (e) {}
+    } catch (e) { }
     try {
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close(1000, 'client stop');
       }
-    } catch (e) {}
+    } catch (e) { }
     state.closed = true;
     state.active = false;
   });
@@ -682,7 +682,7 @@ async function refreshImageGenerationMethod() {
       imageGenerationMethod = method || 'legacy';
       imageGenerationExperimental = isExperimentalImageMethod(imageGenerationMethod);
     }
-  } catch (e) {}
+  } catch (e) { }
 
   if (!imageGenerationExperimental) {
     stopImageContinuous();
@@ -713,7 +713,7 @@ async function refreshModels() {
 
     const filtered = models.filter((m) => {
       const id = String(m.id || '');
-      if (currentTab === 'image') return id === 'grok-imagine-1.0';
+      if (currentTab === 'image') return id === 'grok-imagine-1.0' || id === 'grok-imagine-1.0-edit';
       if (currentTab === 'video') return id === 'grok-imagine-1.0-video';
       return !/imagine/i.test(id) || id === 'grok-4-heavy';
     });
@@ -819,7 +819,7 @@ async function sendChat() {
     showUserMsg('user', prompt || '[图片]');
     q('chat-input').value = '';
     chatAttachments.forEach((a) => {
-      try { URL.revokeObjectURL(a.previewUrl); } catch (e) {}
+      try { URL.revokeObjectURL(a.previewUrl); } catch (e) { }
     });
     chatAttachments = [];
     renderAttachments('chat');
@@ -877,7 +877,7 @@ async function streamChat(body, bubbleEl) {
           renderContent(bubbleEl, acc, false);
           q('chat-messages').scrollTop = q('chat-messages').scrollHeight;
         }
-      } catch (e) {}
+      } catch (e) { }
     }
   }
 
@@ -1130,7 +1130,7 @@ async function generateVideo() {
     }
 
     videoAttachments.forEach((a) => {
-      try { URL.revokeObjectURL(a.previewUrl); } catch (e) {}
+      try { URL.revokeObjectURL(a.previewUrl); } catch (e) { }
     });
     videoAttachments = [];
     renderAttachments('video');
@@ -1168,7 +1168,7 @@ async function streamVideo(body, bubbleEl) {
           acc += delta;
           renderContent(bubbleEl, acc, false);
         }
-      } catch (e) {}
+      } catch (e) { }
     }
   }
 }
