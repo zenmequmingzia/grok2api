@@ -70,6 +70,7 @@ npx wrangler d1 migrations apply DB --remote
 ```
 
 迁移文件在：
+
 - `migrations/0001_init.sql`
 - `migrations/0002_r2_cache.sql`（旧版，已废弃）
 - `migrations/0003_kv_cache.sql`（新版 KV 缓存元数据）
@@ -81,6 +82,7 @@ npx wrangler d1 migrations apply DB --remote
 KV Namespace 建议命名为：`grok2api-cache`
 
 如果你使用 GitHub Actions（推荐），会在部署前自动：
+
 - 创建（或复用）D1 数据库：`grok2api`
 - 创建（或复用）KV namespace：`grok2api-cache`
 - 自动绑定到 Worker（无需你手动填任何 ID）
@@ -92,6 +94,7 @@ npx wrangler kv namespace create grok2api-cache
 ```
 
 然后把输出的 `id` 填到 `wrangler.toml`：
+
 - `[[kv_namespaces]]`
   - `binding = "KV_CACHE"`
   - `id = "<你的namespace id>"`
@@ -118,6 +121,7 @@ npx wrangler deploy
 ```
 
 部署后检查：
+
 - `GET https://<你的域名或workers.dev>/health`
 - 打开 `https://<你的域名或workers.dev>/login`
 
@@ -128,6 +132,7 @@ python scripts/smoke_test.py --base-url https://<你的域名或workers.dev>
 ```
 
 默认管理员账号密码：
+
 - `admin / admin`
 
 强烈建议登录后立刻修改（在「设置」里改 `admin_password` / `admin_username`）。
@@ -144,6 +149,7 @@ python scripts/smoke_test.py --base-url https://<你的域名或workers.dev>
 4. `wrangler deploy`
 
 触发策略保持不变：
+
 - `push` 到 `main`：自动触发 Cloudflare 部署作业
 - `workflow_dispatch`：可手动选择 `cloudflare/docker/both`
 - `v*` tag：用于 Docker 构建发布链路
@@ -181,12 +187,15 @@ python scripts/smoke_test.py --base-url https://<你的域名或workers.dev>
 登录 `/admin/token` 后至少配置（`/manage` 仍保留为兼容入口，会跳转）：
 
 1. **Tokens**：添加 `sso` 或 `ssoSuper`
+   - 添加后会 **自动为所有新 Token 开启 NSFW**（账户级别的 `always_show_nsfw_content`）
+   - 也可以在 Token 列表中选中 Token 后点击 🛡 按钮手动一键开启
 2. **设置**：
    - `dynamic_statsig`（建议开启）
    - 或者关闭动态并填写 `x_statsig_id`
    - （可选）填写 `cf_clearance`（只填值，不要 `cf_clearance=` 前缀）
    - （可选）开启 `video_poster_preview`：将返回内容中的 `<video>` 替换为 Poster 预览图（默认关闭）
    - （可选）`image_generation_method`：`legacy`（默认，稳定）或 `imagine_ws_experimental`（实验性新方法，失败自动回退旧方法）
+   - **图片NSFW**：控制图片生成 WS 负载中 `enable_nsfw` 字段（默认开启）
 3. **Keys**：创建 API Key，用于调用 `/v1/*`
 
 ---
@@ -201,6 +210,23 @@ python scripts/smoke_test.py --base-url https://<你的域名或workers.dev>
 - GET /images/<img_path>: reads from KV cache; on miss fetches assets.grok.com and writes back to KV (daily expiry/cleanup policy)
 - Note: Workers KV single-value size is limited (recommended <= 25MB); most video players use Range requests, which may bypass KV hits
 - Admin APIs: /api/*
+- POST /api/tokens/enable-nsfw: 为指定 Token 开启账户级 NSFW（gRPC-Web 调用 `UpdateUserFeatureControls`）
+
+### 支持的模型
+
+| 模型 | 类型 | 说明 |
+|------|------|------|
+| grok-3 | 聊天 | Grok 3 |
+| grok-3-mini | 聊天 | Grok 3 Mini (Thinking) |
+| grok-3-thinking | 聊天 | Grok 3 Thinking |
+| grok-4 | 聊天 | Grok 4 |
+| grok-4-mini | 聊天 | Grok 4 Mini |
+| grok-4.1-mini | 聊天 | Grok 4.1 Mini |
+| grok-4-thinking | 聊天 | Grok 4 Thinking |
+| grok-4.20-beta | 聊天 | Grok 4.20 Beta |
+| grok-imagine-1.0 | 图片生成 | 图片生成模型 |
+| grok-imagine-1.0-edit | 图片编辑 | 图片编辑模型 |
+| grok-video-1.0 | 视频生成 | 视频生成模型 |
 
 ### 8.1) 管理后台 API 兼容语义（与 FastAPI 一致）
 
@@ -209,9 +235,11 @@ python scripts/smoke_test.py --base-url https://<你的域名或workers.dev>
 - Quota semantics: remaining_queries = -1 means unknown quota; frontend should use quota_known / heavy_quota_known for judgement
 
 ---
+
 ## 9) 部署到 Pages（可选，但不推荐用于“定时清理”）
 
 仓库已提供 Pages Advanced Mode 入口：
+
 - `app/static/_worker.js`
 
 部署静态目录：
@@ -221,10 +249,12 @@ npx wrangler pages deploy app/static --project-name <你的Pages项目名> --com
 ```
 
 然后在 Pages 项目设置里添加绑定（名称必须匹配代码）：
+
 - D1：绑定名 `DB`
 - KV：绑定名 `KV_CACHE`
 
 注意：
+
 - **自动清理依赖 Cron Trigger**，目前更推荐用 Workers 部署该项目以保证定时清理稳定运行。
 
 ---

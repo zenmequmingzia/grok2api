@@ -130,7 +130,7 @@ function isCompleted(msg: WsJson, progress: number | null): boolean {
   return progress !== null && progress >= 100;
 }
 
-function buildImagineWsPayload(prompt: string, requestId: string, aspectRatio: string): WsJson {
+function buildImagineWsPayload(prompt: string, requestId: string, aspectRatio: string, enableNsfw: boolean): WsJson {
   return {
     type: "conversation.item.create",
     timestamp: Date.now(),
@@ -144,7 +144,7 @@ function buildImagineWsPayload(prompt: string, requestId: string, aspectRatio: s
           properties: {
             section_count: 0,
             is_kids_mode: false,
-            enable_nsfw: true,
+            enable_nsfw: enableNsfw,
             skip_upsampler: false,
             is_initial: false,
             aspect_ratio: aspectRatio,
@@ -186,7 +186,8 @@ export async function generateImagineWs(args: {
   }
 
   ws.accept();
-  ws.send(JSON.stringify(buildImagineWsPayload(args.prompt, requestId, aspectRatio)));
+  const enableNsfw = Boolean(args.settings.image_nsfw ?? true);
+  ws.send(JSON.stringify(buildImagineWsPayload(args.prompt, requestId, aspectRatio, enableNsfw)));
 
   const imageIndexes = new Map<string, number>();
   const finalUrls = new Map<string, string>();

@@ -273,6 +273,7 @@ adminRoutes.get("/api/v1/admin/config", requireAdminAuth, async (c) => {
         image_generation_method: normalizeImageGenerationMethod(
           settings.grok.image_generation_method,
         ),
+        image_nsfw: Boolean(settings.grok.image_nsfw ?? true),
       },
       token: {
         auto_refresh: Boolean(settings.token.auto_refresh),
@@ -344,6 +345,7 @@ adminRoutes.post("/api/v1/admin/config", requireAdminAuth, async (c) => {
           grokCfg.image_generation_method,
         );
       }
+      if (typeof grokCfg.image_nsfw === "boolean") grok_config.image_nsfw = grokCfg.image_nsfw;
     }
 
     if (tokenCfg && typeof tokenCfg === "object") {
@@ -720,10 +722,10 @@ adminRoutes.post("/api/v1/admin/tokens/refresh", requireAdminAuth, async (c) => 
     const placeholders = unique.map(() => "?").join(",");
     const typeRows = placeholders
       ? await dbAll<{ token: string; token_type: string }>(
-          c.env.DB,
-          `SELECT token, token_type FROM tokens WHERE token IN (${placeholders})`,
-          unique,
-        )
+        c.env.DB,
+        `SELECT token, token_type FROM tokens WHERE token IN (${placeholders})`,
+        unique,
+      )
       : [];
     const tokenTypeByToken = new Map(typeRows.map((r) => [r.token, r.token_type]));
 
@@ -758,6 +760,79 @@ adminRoutes.post("/api/v1/admin/tokens/refresh", requireAdminAuth, async (c) => 
     return c.json(legacyOk({ results }));
   } catch (e) {
     return c.json(legacyErr(`Refresh failed: ${e instanceof Error ? e.message : String(e)}`), 500);
+  }
+});
+
+// ---- NSFW enable helper (gRPC-Web) ----
+const NSFW_API = "https://grok.com/auth_mgmt.AuthManagement/UpdateUserFeatureControls";
+
+// Pre-built gRPC-Web payload: UpdateUserFeatureControls { feature_controls: { enabled: true }, feature_name: { name: "always_show_nsfw_content" } }
+const NSFW_GRPC_PAYLOAD = new Uint8Array([
+  0x00, 0x00, 0x00, 0x00, 0x20,
+  0x0a, 0x02, 0x10, 0x01,
+  0x12, 0x1a, 0x0a, 0x18,
+  ...new TextEncoder().encode("always_show_nsfw_content"),
+]);
+
+async function enableNsfwForToken(cookie: string, settings: Awaited<ReturnType<typeof getSettings>>["grok"]): Promise<{ ok: boolean; status: number; error?: string }> {
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/grpc-web+proto",
+      "Accept": "*/*",
+      "Origin": "https://grok.com",
+      "Referer": "https://grok.com/?_s=data",
+      "x-grpc-web": "1",
+      "x-user-agent": "connect-es/2.1.1",
+      "Cookie": cookie,
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+    };
+
+    const resp = await fetch(NSFW_API, {
+      method: "POST",
+      headers,
+      body: NSFW_GRPC_PAYLOAD,
+    });
+
+    if (resp.status === 200) {
+      const grpcStatus = resp.headers.get("grpc-status");
+      if (grpcStatus === null || grpcStatus === "0") {
+        return { ok: true, status: 200 };
+      }
+      return { ok: false, status: 200, error: `gRPC status: ${grpcStatus}` };
+    }
+    return { ok: false, status: resp.status, error: `HTTP ${resp.status}` };
+  } catch (e) {
+    return { ok: false, status: 0, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+adminRoutes.post("/api/v1/admin/tokens/enable-nsfw", requireAdminAuth, async (c) => {
+  try {
+    const body = (await c.req.json()) as any;
+    const tokens: string[] = [];
+    if (body && typeof body === "object") {
+      if (typeof body.token === "string") tokens.push(body.token);
+      if (Array.isArray(body.tokens)) tokens.push(...body.tokens.filter((x: any) => typeof x === "string"));
+    }
+    const unique = [...new Set(tokens.map((t) => normalizeSsoToken(t)).filter(Boolean))];
+    if (!unique.length) return c.json(legacyErr("No tokens provided"), 400);
+
+    const settings = await getSettings(c.env);
+    const cf = normalizeCfCookie(settings.grok.cf_clearance ?? "");
+
+    const results: Record<string, { ok: boolean; error?: string }> = {};
+    for (const t of unique) {
+      const cookie = cf
+        ? `sso-rw=${t};sso=${t};${cf}`
+        : `sso-rw=${t};sso=${t}`;
+      const result = await enableNsfwForToken(cookie, settings.grok);
+      results[`sso=${t}`] = { ok: result.ok, ...(result.error ? { error: result.error } : {}) };
+      await new Promise((res) => setTimeout(res, 50));
+    }
+
+    return c.json(legacyOk({ results }));
+  } catch (e) {
+    return c.json(legacyErr(`Enable NSFW failed: ${e instanceof Error ? e.message : String(e)}`), 500);
   }
 });
 
@@ -1165,6 +1240,34 @@ adminRoutes.get("/api/tokens/refresh-progress", requireAdminAuth, async (c) => {
     return c.json({ success: true, data: progress });
   } catch (e) {
     return c.json(jsonError(`获取失败: ${e instanceof Error ? e.message : String(e)}`, "GET_PROGRESS_ERROR"), 500);
+  }
+});
+
+adminRoutes.post("/api/tokens/enable-nsfw", requireAdminAuth, async (c) => {
+  try {
+    const body = (await c.req.json()) as { tokens?: string[]; token?: string };
+    const tokens: string[] = [];
+    if (typeof body.token === "string") tokens.push(body.token);
+    if (Array.isArray(body.tokens)) tokens.push(...body.tokens.filter((x: any) => typeof x === "string"));
+    const unique = [...new Set(tokens.map((t) => normalizeSsoToken(t)).filter(Boolean))];
+    if (!unique.length) return c.json({ success: false, error: "No tokens provided" }, 400);
+
+    const settings = await getSettings(c.env);
+    const cf = normalizeCfCookie(settings.grok.cf_clearance ?? "");
+
+    const results: Record<string, { ok: boolean; error?: string }> = {};
+    for (const t of unique) {
+      const cookie = cf
+        ? `sso-rw=${t};sso=${t};${cf}`
+        : `sso-rw=${t};sso=${t}`;
+      const result = await enableNsfwForToken(cookie, settings.grok);
+      results[`sso=${t}`] = { ok: result.ok, ...(result.error ? { error: result.error } : {}) };
+      await new Promise((res) => setTimeout(res, 50));
+    }
+
+    return c.json({ success: true, status: "success", results });
+  } catch (e) {
+    return c.json({ success: false, error: `Enable NSFW failed: ${e instanceof Error ? e.message : String(e)}` }, 500);
   }
 });
 
